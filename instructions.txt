@@ -1,0 +1,29 @@
+Hi Fran,
+
+I noticed the workload was unbalanced, so I took care of the Telegraf configuration and the Flux Alert scripts, since I was already familiar with the data structure.
+
+# What I have finished:
+* Producers: 3 Python containers are configured to send data in "bursts" using InfluxDB Line Protocol.
+* Broker: Kafka is configured on port 9092.
+* Network: The `deep-space-net` is active.
+* Telegraf Config: I have already configured `telegraf.conf` to bridge my Kafka topics to your InfluxDB.
+* Flux Alerts: I wrote the 3 `.flux` scripts (`alert_mobility`, `alert_eclss`, `alert_hga`) and placed them in the `flux/` folder.
+
+# What you need to do:
+You just need to focus on the Database and the Dashboard Visualization.
+
+* Update `compose.yaml`**
+* Add the `mission-control-db` service (InfluxDB).
+* Add the `telegraf-gateway` service (use the config file I provided).
+* Networking: Connect Telegraf to BOTH networks (`deep-space-net` and `ground-control-net`). Connect InfluxDB ONLY to `ground-control-net`.
+
+* The Dashboard:
+Start the project (`docker compose up --build`). Go to InfluxDB (localhost:8086) and create the visual dashboard:
+Gauge: For "cabin pressure" (from `eclss` measurement).
+Heatmap: Map "rpm" vs "traction" (from `mobility` measurement).
+Stat: Show max "radiation" (from `eclss`).
+Graph: Plot "battery_voltage" with a static RED line (Threshold) at value 20.
+
+* Register the Alerts
+* Go to the "Tasks" or "Alerts" section in InfluxDB.
+* Copy/Paste the code from the `.flux` files I sent you to register them in the system.

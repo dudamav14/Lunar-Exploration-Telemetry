@@ -1,0 +1,14 @@
+FROM python:3.11-slim
+WORKDIR /app
+
+ENV PYTHONUNBUFFERED=1
+
+COPY requirements.txt .
+
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY producer_mobility.py .
+COPY producer_eclss.py .
+COPY producer_hga.py .
+
+CMD ["python", "producer_mobility.py"]
