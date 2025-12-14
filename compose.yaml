@@ -3,20 +3,25 @@ services:
   kafka-kraft:
     image: bitnamilegacy/kafka:latest
     container_name: kafka-kraft
-    hostname: kafka-kraft
+    hostname: kafka-kraft     # nombre con el que se comunica con sus consumidores --> en este caso el telegrafo (al igual que el telegrafo se comunica con Influxdb con el nombre de "lunar-gateway")
     networks:
       - deep-space-net
-    ports:
-      - "9092:9092"
+    # ports:
+    #   - "9092:9092"       # puerto externo para localhost    ¿?    No hace falta, porque el healthcheck lo hace dentro del contenedor --> esto es para conectarse desde tu pc a Kafka
     environment:
-      - KAFKA_CFG_NODE_ID=1
-      - KAFKA_CFG_PROCESS_ROLES=controller,broker
-      - KAFKA_CFG_CONTROLLER_QUORUM_VOTERS=1@kafka-kraft:9093
-      - KAFKA_CFG_LISTENERS=PLAINTEXT://:9092,CONTROLLER://:9093
-      - KAFKA_CFG_ADVERTISED_LISTENERS=PLAINTEXT://kafka-kraft:9092
-      - KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
-      - KAFKA_CFG_CONTROLLER_LISTENER_NAMES=CONTROLLER
-      - KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE=true
+      - KAFKA_CFG_NODE_ID=1         # Esto identifica de forma única a este nodo dentro del cluster KRaft --> si tuviera varios brokers, tendrías node.id distintos: 1, 2, 3, etc
+      - KAFKA_CFG_PROCESS_ROLES=controller,broker     # En el modo Kraft cada nodo Kafka tiene dos roles: controller → gestiona el metadata del cluster y roker → almacena y sirve los mensajes
+      - KAFKA_CFG_CONTROLLER_QUORUM_VOTERS=1@kafka-kraft:9093   # <nodeId>@<host>(nombre del contenedor):<puerto>  --> define quiénes son los controladores del cluster y cómo se comunican entre ellos (e.g. si tuvieramos mas nodos: 1@kafka1:9093,2@kafka2:9093,3@kafka3:9093)
+      - KAFKA_CFG_LISTENERS=PLAINTEXT://:9092,CONTROLLER://:9093   # en qué direcciones y puertos escucha Kafka: Puerto 9092 → clientes (Python producers, Telegraf), Puerto 9093 → canal interno KRaft para el controller
+      - KAFKA_CFG_ADVERTISED_LISTENERS=PLAINTEXT://kafka-kraft:9092       # Cuando se conecta un cliente a Kafka --> “Si quieres seguir hablando conmigo, hazlo en PLAINTEXT://kafka-kraft:9092”.
+      - KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT     # Kafka permite que cada listener use un protocolo de seguridad distinto
+      - KAFKA_CFG_CONTROLLER_LISTENER_NAMES=CONTROLLER        # Esto le dice a Kafka qué listener (de los definidos en LISTENERS) se usa para el rol de controller.
+      - KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE=true    # Cuando tus productores empiecen a enviar a los distintos tópicos --> Kafka creará esos topics automáticamente si no existían (con False tienes que crear los topics explícitamente (kafka-topics.sh --create ...), si no, fallan)
+
+      # Hay una diferencia entre:
+        # Dónde escucha Kafka internamente (LISTENERS).
+        # Cómo “se presenta” Kafka a los clientes (ADVERTISED_LISTENERS).
+
     volumes:
       - kafka-data:/bitnami/kafka
     healthcheck:
@@ -30,7 +35,7 @@ services:
     build: 
       context: ./producers
     container_name: prod-mobility
-    entrypoint: ["python", "producer_mobility.py"]
+    entrypoint: ["python", "-u", "producer_mobility.py"]        # sobreescribe el comando del dockerfile
     depends_on:
       kafka-kraft:
         condition: service_healthy
@@ -42,7 +47,7 @@ services:
     build: 
       context: ./producers
     container_name: prod-eclss
-    entrypoint: ["python", "producer_eclss.py"]
+    entrypoint: ["python", "-u", "producer_eclss.py"]
     depends_on:
       kafka-kraft:
         condition: service_healthy
@@ -54,21 +59,76 @@ services:
     build: 
       context: ./producers
     container_name: prod-hga
-    entrypoint: ["python", "producer_hga.py"]
+    entrypoint: ["python", "-u", "producer_hga.py"]
     depends_on:
       kafka-kraft:
         condition: service_healthy
     networks:
       - deep-space-net
 
+  mission-control-db:
+    image: influxdb:latest
+    container_name: mission-control-db
+    environment:
+      - DOCKER_INFLUXDB_INIT_MODE=${DOCKER_INFLUXDB_INIT_MODE}
+      - DOCKER_INFLUXDB_INIT_USERNAME=${DOCKER_INFLUXDB_INIT_USERNAME}
+      - DOCKER_INFLUXDB_INIT_PASSWORD=${DOCKER_INFLUXDB_INIT_PASSWORD}
+      - DOCKER_INFLUXDB_INIT_ORG=${DOCKER_INFLUXDB_INIT_ORG}
+      - DOCKER_INFLUXDB_INIT_BUCKET=${DOCKER_INFLUXDB_INIT_BUCKET}
+      - DOCKER_INFLUXDB_INIT_ADMIN_TOKEN=${DOCKER_INFLUXDB_INIT_ADMIN_TOKEN}
+    ports:
+      - "8086:8086"
+    volumes:
+      - influxdb-data:/var/lib/influxdb2
+      - influxdb-conf:/etc/influxdb2        # (en realidad en nuestro proyecto no haría falta pero son buenas prácticas --> si queremos usar una DB en otro pc y es un proyecto grande con un DB configurado a detalle entonces sería conveniente pasar no solo los datos sino también la config)
+    networks:
+      - ground-control-net
+
+    # healthcheck:
+    #   test: ["CMD", "mission-control-db", "ping", "-host", "localhost"]
+    #   interval: 10s                                                           -->          con esto realmente solo comprobamos que el contenedor está vivo pero no que el servicio interno funciona correctamete (base de datos)
+    #   timeout: 5s
+    #   retries: 5
+
+    healthcheck:    # la forma de hacer el healtcheck ha cmbiado resecto a MariaDB porque aqui con curl analizamos la respuesta http mientras que en MariaDB solo habia que exe un fichero y cambiar los parametros para enviar los healtchecks
+      test: ["CMD", "curl", "-f", "http://localhost:8086/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+
+  telegraf-gateway:
+    image: telegraf:latest
+    container_name: telegraf-gateway
+    depends_on:
+      kafka-kraft:
+        condition: service_healthy
+      mission-control-db:
+        condition: service_healthy
+    volumes:
+      - ./telegraf/telegraf.conf:/etc/telegraf/telegraf.conf:ro       # volumen con ruta ./telegraf/telegraf.conf en host montado en la ruta /etc/telegraf/telegraf.conf con permisos de lectura para leer el archivo telegraf.conf
+    environment:
+      - INFLUX_TOKEN=${DOCKER_INFLUXDB_INIT_ADMIN_TOKEN}     # ¿? EL profesor ha creado un token fácil para usar pero en realidad lo que realmente se debería hacer es generar tu token propio en influxdb y luego como se borra auto despues de generarlo, hay que guardarlo en un archivo específico que lo encripta, porque de esta manera como lo estamos haciendo si alguien coge tu .env --> te quitan la contraseña --> 0% seguridad
+      - INFLUX_ORG=${DOCKER_INFLUXDB_INIT_ORG}
+      - INFLUX_BUCKET=${DOCKER_INFLUXDB_INIT_BUCKET}
+    networks:
+      - deep-space-net
+      - ground-control-net
+
+      # telegraf.conf no tiene forma de leer archivos del host; solo puede leer variables de entorno dentro del contenedor.
+      # --> Por eso necesitas que Docker Compose se encargue de pasar las variables del .env al contenedor, pues Docker Compose si puede acceder a las variables del entorno general
   
 networks:
-  deep-space-net:
+  deep-space-net:       
+    driver: bridge          # # red interna de tipo "bridge" para que pueda comunicarse entre los contenedores por nombres en lugar de IPs
+  ground-control-net: 
     driver: bridge
-  # ground-control-net: ****(Add this part)
-  #   driver: bridge
 
-volumes:
+volumes:       # Volume Docker Engine
   kafka-data:
     driver: local
-  # influxdb-data: ****(Add this part)
+  influxdb-data: 
+    driver: local
+  influxdb-conf: 
+    driver: local

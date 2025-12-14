@@ -12,3 +12,13 @@ from(bucket: "lunar-mission")
     })
   )
   |> yield(name: "monitor_eclss")
+
+
+# Nivel INFO no aparece
+  # El enunciado pide niveles: OK, INFO, WARN, CRIT.
+  # Aquí sólo tienes: "CRIT", "WARN", "OK".                   --> NO hace falta en nuestro contexto INFO porque no habría que enseñar --> es innecesario y suficiente con lo que ya tenemos
+  # Te falta introducir algún caso donde devuelva "INFO"
+
+
+
+  
