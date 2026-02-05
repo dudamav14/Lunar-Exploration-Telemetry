@@ -1,6 +1,6 @@
 #  Lunar Exploration Telemetry Infrastructure
 
-Este projeto implementa uma **infraestrutura de telemetria resiliente** projetada para monitorar um *Rover* na superfície lunar. A arquitetura foca no desacoplamento entre a geração de dados e sua persistência, garantindo a integridade das informações em condições extremas de rede[cite: 30, 31, 33].
+Este projeto implementa uma **infraestrutura de telemetria resiliente** projetada para monitorar um *Rover* na superfície lunar. A arquitetura foca no desacoplamento entre a geração de dados e sua persistência, garantindo a integridade das informações em condições extremas de rede.
 
 ---
 
